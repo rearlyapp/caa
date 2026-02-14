@@ -27,6 +27,38 @@
     - Implement FastAPI backend wrapping Modal inference
     - Build React + Vite frontend for the Document-First workflow
 
+## 2026-02-14 — Frontend UI Screens Built (Next.js + shadcn/ui)
+- **UI Framework chosen**: Next.js 16 App Router + shadcn/ui + Tailwind CSS v4
+    - Lightweight, reliable, robust, flexible, and professional-grade
+    - shadcn/ui provides accessible Radix-based components with full customization
+    - SWR for data fetching/caching, Lucide React for icons
+- **All 5 screens implemented** per the UX Specification in `docs/spec.md`:
+
+| # | Screen | Route | Component | Description |
+|---|--------|-------|-----------|-------------|
+| 1 | **Dashboard** | `/` | `components/dashboard.tsx` | Case list table with status badges (Draft/Extracting/Reviewing/Complete), stats cards, "New Case" dialog |
+| 2 | **Case View** | `/case/[id]` | `components/case-view.tsx` | Tabbed (Director 1/2) drag-and-drop upload zones for PAN, Aadhaar, Photo, Signature. Inference mode toggle (Modal GPU / Local CPU). "Process All" button with loading state |
+| 3 | **Review Tool** | `/case/[id]/review` | `components/review-tool.tsx` | Split-pane: 60% document viewer (zoom/pan/rotate) + 40% editable AI-extracted fields. PAN fields (name, father's name, DOB, PAN number) and Aadhaar fields (name, number, DOB, gender, address). Name mismatch warning banner. Per-director confirm/re-extract |
+| 4 | **Manual Fields** | `/case/[id]/manual` | `components/manual-fields-form.tsx` | Two-column side-by-side Director 1/2 form. Sections: Director Details (10 fields each), Company Info (8 fields), Professional Info (3 fields). Smart defaults pre-filled (Nationality=Indian, Residency=Yes, Objectives template) |
+| 5 | **Export** | `/case/[id]/export` | `components/export-view.tsx` | Summary table of all fields with source tags (AI/Manual/Default). Completion progress bar. Generate & Download Excel button with success state |
+
+- **4 API routes** created (mock backend, ready for real Modal integration):
+    - `GET/POST /api/cases` — list and create cases
+    - `GET/PATCH/DELETE /api/cases/[id]` — case CRUD
+    - `POST /api/extract` — mock AI extraction (simulates 2s delay, returns demo data)
+    - `POST /api/export` — mock Excel generation (simulates 1.5s delay)
+- **Shared infrastructure**:
+    - `lib/types.ts` — full TypeScript types for Case, Director, PanData, AadhaarData, CompanyInfo, ProfessionalInfo
+    - `lib/store.ts` — in-memory store with 3 seeded demo cases
+    - `lib/utils.ts` — `cn()` class merge utility
+    - 10 shadcn/ui components: Button, Badge, Card, Input, Label, Textarea, Dialog, Tabs, Progress, Separator
+- **Design system**: Professional blue (#1a6ed8) primary, clean neutral palette, Inter + JetBrains Mono fonts, light/dark theme tokens
+- **Next Steps**:
+    - Connect mock API to real Modal GPU inference endpoint (FastAPI wrapper)
+    - Implement real file upload storage
+    - Add openpyxl Excel generation in export API
+    - Add authentication for multi-user access
+
 ## 2026-02-14 12:59:00 +05:30
 - **CPU benchmark completed** (`test_qwen.py`):
     - Model load: **2.8s** (from local `./models/Qwen3-VL-2B-Instruct`)
