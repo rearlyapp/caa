@@ -13,6 +13,7 @@ import {
   Building2,
   Briefcase,
   RotateCcw,
+  AlertCircle,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -31,6 +32,14 @@ const fetcher = (url: string) => fetch(url).then((res) => res.json())
 
 interface ExportViewProps {
   caseId: string
+}
+
+interface ExportResponse {
+  fileName: string
+  fieldsFilled: number
+  totalFields: number
+  fileContentBase64?: string
+  error?: string
 }
 
 interface FieldRow {
@@ -162,11 +171,8 @@ export function ExportView({ caseId }: ExportViewProps) {
   const router = useRouter()
   const [generating, setGenerating] = useState(false)
   const [generated, setGenerated] = useState(false)
-  const [result, setResult] = useState<{
-    fileName: string
-    fieldsFilled: number
-    totalFields: number
-  } | null>(null)
+  const [result, setResult] = useState<ExportResponse | null>(null)
+  const [errorMessage, setErrorMessage] = useState("")
 
   if (!caseData) {
     return (
@@ -181,17 +187,44 @@ export function ExportView({ caseId }: ExportViewProps) {
   const total = fieldRows.length * 2
   const percentage = Math.round((filled / total) * 100)
 
+  function downloadExcel(fileName: string, fileContentBase64?: string) {
+    if (!fileContentBase64) return
+    const binary = atob(fileContentBase64)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i)
+    }
+    const blob = new Blob([bytes], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement("a")
+    anchor.href = url
+    anchor.download = fileName
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+
   async function handleGenerate() {
     setGenerating(true)
+    setErrorMessage("")
     try {
       const res = await fetch("/api/export", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ caseId }),
       })
-      const data = await res.json()
+      const data = (await res.json()) as ExportResponse
+      if (!res.ok) {
+        throw new Error(data.error ?? "Excel generation failed")
+      }
       setResult(data)
       setGenerated(true)
+      downloadExcel(data.fileName, data.fileContentBase64)
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Export failed")
     } finally {
       setGenerating(false)
     }
@@ -377,7 +410,11 @@ export function ExportView({ caseId }: ExportViewProps) {
                 </p>
               </div>
               <div className="flex items-center gap-3 mt-2">
-                <Button>
+                <Button
+                  onClick={() =>
+                    downloadExcel(result.fileName, result.fileContentBase64)
+                  }
+                >
                   <Download className="h-4 w-4" />
                   Download .xlsx
                 </Button>
@@ -429,6 +466,13 @@ export function ExportView({ caseId }: ExportViewProps) {
           )}
         </CardContent>
       </Card>
+
+      {errorMessage && (
+        <div className="flex items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{errorMessage}</span>
+        </div>
+      )}
 
       <Separator />
 

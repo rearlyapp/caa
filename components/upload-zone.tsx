@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useState } from "react"
-import { Upload, FileImage, Check, AlertCircle, Loader2, X } from "lucide-react"
+import { Upload, FileImage, FileText, Check, AlertCircle, Loader2, X } from "lucide-react"
 import { cn } from "@/lib/utils"
 
 interface UploadedFile {
@@ -29,6 +29,11 @@ export function UploadZone({
   onRemove,
 }: UploadZoneProps) {
   const [isDragOver, setIsDragOver] = useState(false)
+  const isImagePreview = Boolean(file?.url && file.url.startsWith("data:image/"))
+  const isPdfFile = Boolean(
+    file &&
+      (file.url.startsWith("data:application/pdf") || file.name.toLowerCase().endsWith(".pdf"))
+  )
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -57,24 +62,38 @@ export function UploadZone({
       <div className="relative flex items-center gap-3 rounded-lg border bg-card p-4">
         <div
           className={cn(
-            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+            "flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg",
             file.status === "done" && "bg-success/10",
             file.status === "processing" && "bg-warning/10",
             file.status === "error" && "bg-destructive/10",
             file.status === "pending" && "bg-muted"
           )}
         >
-          {file.status === "done" && (
-            <Check className="h-5 w-5 text-success" />
-          )}
-          {file.status === "processing" && (
-            <Loader2 className="h-5 w-5 animate-spin text-warning" />
-          )}
-          {file.status === "error" && (
-            <AlertCircle className="h-5 w-5 text-destructive" />
-          )}
-          {file.status === "pending" && (
-            <FileImage className="h-5 w-5 text-muted-foreground" />
+          {isImagePreview && file.status !== "processing" ? (
+            <img
+              src={file.url}
+              alt={label}
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <>
+              {file.status === "done" && (
+                <Check className="h-5 w-5 text-success" />
+              )}
+              {file.status === "processing" && (
+                <Loader2 className="h-5 w-5 animate-spin text-warning" />
+              )}
+              {file.status === "error" && (
+                <AlertCircle className="h-5 w-5 text-destructive" />
+              )}
+              {file.status === "pending" && (
+                isPdfFile ? (
+                  <FileText className="h-5 w-5 text-muted-foreground" />
+                ) : (
+                  <FileImage className="h-5 w-5 text-muted-foreground" />
+                )
+              )}
+            </>
           )}
         </div>
         <div className="flex-1 min-w-0">
@@ -82,6 +101,9 @@ export function UploadZone({
             {label}
           </p>
           <p className="text-xs text-muted-foreground truncate">{file.name}</p>
+          <p className="text-[11px] text-muted-foreground capitalize mt-0.5">
+            {file.status}
+          </p>
         </div>
         {onRemove && (
           <button

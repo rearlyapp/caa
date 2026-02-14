@@ -5,6 +5,7 @@ export interface DirectorDocument {
   type: "pan" | "aadhaar" | "photo" | "signature"
   fileName: string
   fileUrl: string
+  contentBase64?: string
   status: "pending" | "processing" | "done" | "error"
   extractedData?: Record<string, string>
 }
@@ -71,7 +72,7 @@ export interface Case {
   directors: [DirectorInfo, DirectorInfo]
   companyInfo: CompanyInfo
   professionalInfo: ProfessionalInfo
-  inferenceMode: "modal" | "cpu"
+  inferenceMode: "modal"
 }
 
 export function createEmptyDirector(): DirectorInfo {

@@ -21,6 +21,7 @@ app = modal.App("caa-doc-extractor")
 
 MODEL_ID = "Qwen/Qwen3-VL-2B-Instruct"
 MODEL_DIR = "/model-cache"
+SCALEDOWN_WINDOW_SECONDS = 600
 
 
 def download_model():
@@ -45,6 +46,7 @@ image = (
         "Pillow",
         "openpyxl",
         "qwen-vl-utils",
+        "pypdfium2",
     )
     .run_function(download_model)
 )
@@ -94,7 +96,7 @@ Rules:
     image=image,
     gpu="T4",
     timeout=300,
-    scaledown_window=120,
+    scaledown_window=SCALEDOWN_WINDOW_SECONDS,
 )
 class Extractor:
     @modal.enter()
@@ -117,15 +119,47 @@ class Extractor:
         print(f"Model loaded in {time.time() - t0:.1f}s")
 
     @modal.method()
-    def extract(self, image_b64: str, prompt: str) -> dict:
+    def extract(
+        self,
+        image_b64: str,
+        prompt: str,
+        file_name: str = "",
+        mime_type: str = "",
+    ) -> dict:
         """Extract fields from a base64-encoded image using the given prompt."""
         import torch
         from PIL import Image
+        from PIL import ImageEnhance, ImageOps
+        import pypdfium2 as pdfium
         import io
 
         # Decode base64 image
         img_bytes = base64.b64decode(image_b64)
-        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+        is_pdf = mime_type == "application/pdf" or str(file_name).lower().endswith(".pdf")
+        if is_pdf:
+            pdf = pdfium.PdfDocument(img_bytes)
+            if len(pdf) < 1:
+                return {"raw_text": "{}", "elapsed": 0.0, "error": "PDF has no pages"}
+            page = pdf[0]
+            rendered = page.render(scale=2.0)
+            image = rendered.to_pil().convert("RGB")
+        else:
+            image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        max_side = 1800
+        max_pixels = 4_000_000
+        width, height = image.size
+        side_scale = min(1.0, max_side / max(width, height))
+        pixel_scale = min(1.0, (max_pixels / (width * height)) ** 0.5)
+        scale = min(side_scale, pixel_scale)
+        if scale < 1.0:
+            image = image.resize(
+                (max(1, int(width * scale)), max(1, int(height * scale))),
+                Image.Resampling.LANCZOS,
+            )
+        image = ImageOps.autocontrast(image, cutoff=1)
+        image = ImageEnhance.Contrast(image).enhance(1.15)
 
         messages = [{
             "role": "user",
@@ -194,6 +228,62 @@ def parse_json_output(text: str) -> dict:
 
     print("WARNING: Could not parse JSON from model output")
     return {}
+
+
+def normalize_pan(data: dict) -> dict:
+    pan_number = str(data.get("pan_number", "")).upper().strip().replace(" ", "")
+    pan_match = re.search(r"[A-Z]{5}[0-9]{4}[A-Z]", pan_number)
+    return {
+        "name": str(data.get("name", "")).strip(),
+        "fathers_name": str(data.get("fathers_name", "")).strip(),
+        "date_of_birth": str(data.get("date_of_birth", "")).strip(),
+        "pan_number": pan_match.group(0) if pan_match else pan_number,
+    }
+
+
+def normalize_aadhaar(data: dict) -> dict:
+    aadhaar = str(data.get("aadhaar_number", "")).strip()
+    digits = re.sub(r"\D", "", aadhaar)
+    if len(digits) == 12:
+        aadhaar = f"{digits[:4]} {digits[4:8]} {digits[8:]}"
+    return {
+        "name": str(data.get("name", "")).strip(),
+        "aadhaar_number": aadhaar,
+        "date_of_birth": str(data.get("date_of_birth", "")).strip(),
+        "gender": str(data.get("gender", "")).strip().upper(),
+        "address": str(data.get("address", "")).strip(),
+    }
+
+
+@app.function(image=image, timeout=300)
+@modal.web_endpoint(method="POST")
+def api_extract(payload: dict) -> dict:
+    """Modal HTTP endpoint for Next.js API route integration."""
+    image_b64 = payload.get("image_base64", "")
+    document_type = payload.get("document_type", "")
+    file_name = str(payload.get("file_name", "")).lower()
+    mime_type = str(payload.get("mime_type", "")).lower()
+
+    if not image_b64:
+        return {"error": "image_base64 is required"}
+    if document_type not in {"pan", "aadhaar"}:
+        return {"error": "document_type must be pan or aadhaar"}
+    extractor = Extractor()
+    prompt = PAN_PROMPT if document_type == "pan" else AADHAAR_PROMPT
+    result = extractor.extract.remote(image_b64, prompt, file_name, mime_type)
+    parsed = parse_json_output(result.get("raw_text", ""))
+    normalized = (
+        normalize_pan(parsed)
+        if document_type == "pan"
+        else normalize_aadhaar(parsed)
+    )
+
+    return {
+        "document_type": document_type,
+        "elapsed": result.get("elapsed"),
+        "raw_text": result.get("raw_text", ""),
+        "extracted_data": normalized,
+    }
 
 
 # ── Excel Output ─────────────────────────────────────────────────────────────
@@ -271,7 +361,9 @@ def main(
     if pan:
         print(f"\n📄 Sending PAN card to GPU...")
         img_b64 = base64.b64encode(Path(pan).read_bytes()).decode()
-        result = extractor.extract.remote(img_b64, PAN_PROMPT)
+        result = extractor.extract.remote(
+            img_b64, PAN_PROMPT, Path(pan).name, "image/jpeg"
+        )
         print(f"   Inference: {result['elapsed']:.1f}s")
         print(f"   Raw: {result['raw_text']}")
         pan_data = parse_json_output(result["raw_text"])
@@ -282,7 +374,9 @@ def main(
     if aadhaar:
         print(f"\n🆔 Sending Aadhaar card to GPU...")
         img_b64 = base64.b64encode(Path(aadhaar).read_bytes()).decode()
-        result = extractor.extract.remote(img_b64, AADHAAR_PROMPT)
+        result = extractor.extract.remote(
+            img_b64, AADHAAR_PROMPT, Path(aadhaar).name, "image/jpeg"
+        )
         print(f"   Inference: {result['elapsed']:.1f}s")
         print(f"   Raw: {result['raw_text']}")
         aadhaar_data = parse_json_output(result["raw_text"])

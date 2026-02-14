@@ -8,6 +8,7 @@ import {
   ArrowRight,
   Check,
   AlertTriangle,
+  AlertCircle,
   ZoomIn,
   ZoomOut,
   RotateCw,
@@ -48,6 +49,7 @@ export function ReviewTool({ caseId }: ReviewToolProps) {
   const [zoom, setZoom] = useState(1)
   const [rotation, setRotation] = useState(0)
   const [reextracting, setReextracting] = useState(false)
+  const [errorMessage, setErrorMessage] = useState("")
   const [editedPan, setEditedPan] = useState<Record<number, PanData>>({})
   const [editedAadhaar, setEditedAadhaar] = useState<
     Record<number, AadhaarData>
@@ -62,6 +64,7 @@ export function ReviewTool({ caseId }: ReviewToolProps) {
   }
 
   const director = caseData.directors[activeDirector]
+  const activeDocument = director.documents.find((doc) => doc.type === activeDoc)
   const panData = editedPan[activeDirector] ?? director.panData
   const aadhaarData = editedAadhaar[activeDirector] ?? director.aadhaarData
 
@@ -95,8 +98,9 @@ export function ReviewTool({ caseId }: ReviewToolProps) {
 
   async function handleReextract() {
     setReextracting(true)
+    setErrorMessage("")
     try {
-      await fetch("/api/extract", {
+      const response = await fetch("/api/extract", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -105,7 +109,17 @@ export function ReviewTool({ caseId }: ReviewToolProps) {
           documentType: activeDoc,
         }),
       })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => null)
+        const message =
+          payload && typeof payload.error === "string"
+            ? payload.error
+            : `Unable to re-extract ${activeDoc}`
+        throw new Error(message)
+      }
       await mutate()
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : "Re-extraction failed")
     } finally {
       setReextracting(false)
     }
@@ -187,6 +201,13 @@ export function ReviewTool({ caseId }: ReviewToolProps) {
               PAN: {panData?.name} | Aadhaar: {aadhaarData?.name}
             </p>
           </div>
+        </div>
+      )}
+
+      {errorMessage && (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+          <AlertCircle className="h-5 w-5 shrink-0 text-destructive" />
+          <p className="text-sm text-destructive">{errorMessage}</p>
         </div>
       )}
 
@@ -280,27 +301,46 @@ export function ReviewTool({ caseId }: ReviewToolProps) {
             </CardHeader>
             <CardContent>
               <div className="flex items-center justify-center rounded-lg bg-muted/50 min-h-[400px] overflow-hidden">
-                <div
-                  className="flex flex-col items-center justify-center gap-3 p-8 text-center"
-                  style={{
-                    transform: `scale(${zoom}) rotate(${rotation}deg)`,
-                    transition: "transform 0.2s ease",
-                  }}
-                >
-                  <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-muted">
-                    {activeDoc === "pan" ? (
-                      <CreditCard className="h-8 w-8 text-muted-foreground" />
-                    ) : (
+                {activeDocument?.fileUrl &&
+                !activeDocument.fileName.toLowerCase().endsWith(".pdf") ? (
+                  <img
+                    src={activeDocument.fileUrl}
+                    alt={`${activeDoc} preview`}
+                    className="max-h-[380px] rounded-md border object-contain shadow-sm"
+                    style={{
+                      transform: `scale(${zoom}) rotate(${rotation}deg)`,
+                      transition: "transform 0.2s ease",
+                    }}
+                  />
+                ) : activeDocument?.fileName.toLowerCase().endsWith(".pdf") ? (
+                  <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-muted">
                       <FileText className="h-8 w-8 text-muted-foreground" />
-                    )}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      PDF preview is not available in this panel
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Re-upload as image for side-by-side preview
+                    </p>
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    {activeDoc === "pan" ? "PAN Card" : "Aadhaar Card"} Preview
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    Document image will appear here after upload
-                  </p>
-                </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                    <div className="flex h-16 w-16 items-center justify-center rounded-xl bg-muted">
+                      {activeDoc === "pan" ? (
+                        <CreditCard className="h-8 w-8 text-muted-foreground" />
+                      ) : (
+                        <FileText className="h-8 w-8 text-muted-foreground" />
+                      )}
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {activeDoc === "pan" ? "PAN Card" : "Aadhaar Card"} Preview
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      Document image will appear here after upload
+                    </p>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>

@@ -1,0 +1,29 @@
+services:
+  backend:
+    image: python:3.12-slim
+    container_name: caa-backend
+    restart: always
+    working_dir: /app
+    volumes:
+      - .:/app
+    command: sh -c "export PYTHONPATH=$PYTHONPATH:/app/venv/lib/python3.12/site-packages && python -m uvicorn backend.api:app --host 0.0.0.0 --port 8000"
+    environment:
+      - LOCAL_MODEL_DIR=/app/models/Qwen3-VL-2B-Instruct
+      - CHECKLIST_TEMPLATE_PATH=/app/Checklist for Company Formation dated 11 02 2026.xlsx
+    ports:
+      - 8000:8000
+
+  frontend:
+    build: .
+    container_name: caa-frontend
+    restart: always
+    depends_on:
+      - backend
+    ports:
+      - 3000:3000
+    env_file:
+      - .env.local
+    environment:
+      - NODE_ENV=production
+      - LOCAL_API_URL=http://backend:8000
+      # MODAL_API_URL will be loaded from .env.local
